@@ -34,21 +34,25 @@ class MainViewController: UIViewController {
     private let disposeBag = DisposeBag()
     private let images = BehaviorRelay<[UIImage]>(value: [])
     
+    private var imageCache = [Int]()
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        images.asObservable()
-            .subscribe(onNext: { [weak self] (photos) in
-                guard let preview = self?.imagePreview else {return}
-                preview.image = UIImage.collage(images: photos, size: preview.frame.size)
-            }) {
-                print("Images disposed")
-        }
-        .disposed(by: disposeBag)
+        images
+            .asObservable()
+            .subscribe(
+                onNext: { [weak self] (photos) in
+                    guard let preview = self?.imagePreview else {return}
+                    preview.image = UIImage.collage(images: photos, size: preview.frame.size)
+            })
+            .disposed(by: disposeBag)
         
-        images.asObservable()
-            .subscribe(onNext: { [weak self] (photos) in
-                self?.updateUI(photos: photos)
+        images
+            .asObservable()
+            .subscribe(
+                onNext: { [weak self] (photos) in
+                    self?.updateUI(photos: photos)
             })
             .disposed(by: disposeBag)
     }
@@ -62,16 +66,43 @@ class MainViewController: UIViewController {
     
     @IBAction func actionClear() {
         images.accept([])
+        imageCache = []
     }
     
     @IBAction func actionSave() {
-        
+        guard let image = imagePreview.image else { return }
+        PhotoWriter
+            .save(image)
+            .subscribe(
+                onSuccess: { [weak self] id in
+                    self?.showMessage("Saved with id: \(id)")
+                    self?.actionClear()
+                },
+                onError: { [weak self] error in
+                    self?.showMessage("Error", description: error.localizedDescription)
+                    
+            })
+            .disposed(by: disposeBag)
     }
     
     @IBAction func actionAdd() {
         let photosViewController = storyboard!.instantiateViewController(withIdentifier: "PhotosViewController") as! PhotosViewController
         
-        photosViewController.selectedPhotos
+        //        photosViewController.selectedPhotos
+        let newPhotos = photosViewController.selectedPhotos.share()
+        newPhotos
+            .takeWhile { [weak self] image in
+                return (self?.images.value.count ?? 0) < 6 }
+            .filter { newImage in
+                return newImage.size.width > newImage.size.height }
+            .filter { [weak self] newImage in
+                guard let self = self else { return false }
+                let len = UIImagePNGRepresentation(newImage)?.count ?? 0
+                guard !self.imageCache.contains(len) else {
+                    return false
+                }
+                self.imageCache.append(len)
+                return true }
             .subscribe(onNext: { [weak self] (newImage) in
                 guard let images = self?.images else {return}
                 var newArrayImages = images.value
@@ -82,12 +113,25 @@ class MainViewController: UIViewController {
         }
         .disposed(by: disposeBag)
         
+        newPhotos
+            .ignoreElements()
+            .subscribe(onCompleted: { [weak self] in
+                self?.updateNavigationIcon() })
+            .disposed(by: photosViewController.disposeBag)
+        
         navigationController!.pushViewController(photosViewController, animated: true)
     }
     
     func showMessage(_ title: String, description: String? = nil) {
         let alert = UIAlertController(title: title, message: description, preferredStyle: .alert)
+        
         alert.addAction(UIAlertAction(title: "Close", style: .default, handler: { [weak self] _ in self?.dismiss(animated: true, completion: nil)}))
+        
         present(alert, animated: true, completion: nil)
+    }
+    
+    private func updateNavigationIcon() { let icon = imagePreview.image?
+        .scaled(CGSize(width: 22, height: 22)) .withRenderingMode(.alwaysOriginal)
+        navigationItem.leftBarButtonItem = UIBarButtonItem(image: icon, style: .done, target: nil, action: nil)
     }
 }

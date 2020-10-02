@@ -50,6 +50,8 @@ class PhotosViewController: UICollectionViewController {
         return selectedPhotosSubject.asObserver()
     }
     
+    var disposeBag = DisposeBag()
+    
     // MARK: View Controller
     override func viewDidLoad() {
         super.viewDidLoad()
